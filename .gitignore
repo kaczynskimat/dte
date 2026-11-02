@@ -1,1 +1,2 @@
-/data
+# Ignore all CSV files in the data directory that start with the letter "B" (B183, B203, etc. - that stands for buses) and end with the .csv extension. This is useful for excluding specific bus data files from version control while allowing other CSV files to be tracked.
+data/B*.csv
