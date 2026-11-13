@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    container_name: dte-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+  redis-cache:
+    image: redis:7-alpine
+    container_name: dte-redis
+    ports:
+      - "6379:6379"
