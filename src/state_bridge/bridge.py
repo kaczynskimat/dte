@@ -4,36 +4,48 @@ import json
 
 def on_message(client, userdata, msg):
     topic = msg.topic
-    payload = msg.payload.decode('utf-8')  # decode the payload to a string
-    print(f"Received message on topic {topic}: {payload}")
-    # r.set(topic, payload)  # store the message in Redis with the topic as the key
-    data = json.loads(payload)
-    # clean_data = {k: ("" if v is None else v) for k, v in data.items()} # replace None values with empty strings
 
-    clean_data = {}
-    for k, v in data.items():
-        if isinstance(v, dict):
-            clean_data[k] = json.dumps(v) # convert nested dict to string
-        elif v is None:
-            clean_data[k] = "" # handle None/null
-        else:
-            clean_data[k] = v # keep ints, floats, strings as-is
+    try:
+        payload = msg.payload.decode('utf-8')  # decode the payload to a string
+        print(f"Received message on topic {topic}: {payload}")
+        # r.set(topic, payload)  # store the message in Redis with the topic as the key
+        data = json.loads(payload)
+        # clean_data = {k: ("" if v is None else v) for k, v in data.items()} # replace None values with empty strings
 
-    bus_id = topic.split('/')[1]  # grabs "B208"    
-    key = f"bus:{bus_id}:state"
+        if not isinstance(data, dict):
+            print(f"Ignoring non-object JSON payload on topic: {topic}")
+            return
+
+        clean_data = {}
+        for k, v in data.items():
+            if isinstance(v, dict):
+                clean_data[k] = json.dumps(v) # convert nested dict to string
+            elif v is None:
+                clean_data[k] = "" # handle None/null
+            else:
+                clean_data[k] = v # keep ints, floats, strings as-is
+
+        bus_id = topic.split('/')[1]  # grabs "B208"
+        key = f"bus:{bus_id}:state"
+
+        r.hset(key, mapping=clean_data)
+    except (UnicodeDecodeError, json.JSONDecodeError, IndexError, redis.RedisError) as error:
+        # Invalid messages must not stop the MQTT loop.
+        print(f"Ignoring message on {topic}: {error}")
 
 
-    r.hset(key, mapping=clean_data)
-
-
+def on_connect(client, userdata, flags, reason_code):
+    if reason_code == 0:
+        client.subscribe("ztbus/#")  # subscribe to all topics
+        print("Connected to MQTT broker and subscribed to ztbus/#")
+    else:
+        print(f"MQTT connection failed: {reason_code}")
 
 
 r = redis.Redis(host='localhost', port=6379, decode_responses=True) # decode responses returns strings instead of raw byte strings
 client = mqtt.Client()
-client.connect("localhost", 1883, 60)
+client.on_connect = on_connect
 client.on_message = on_message
-client.subscribe("ztbus/#")  # subscribe to all topics
-client.loop_forever()  # start the MQTT client loop
-
-
-
+client.reconnect_delay_set(min_delay=1, max_delay=30)
+client.connect_async("localhost", 1883, 60)
+client.loop_forever(retry_first_connection=True)  # start the MQTT client loop
