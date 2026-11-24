@@ -108,7 +108,6 @@ def _heading(telemetry: dict) -> str:
 
 
 def infer_state(telemetry: dict) -> str:
-    """Infer the bus operating state from one telemetry snapshot."""
     speed_kmh = _speed_kmh(telemetry)
     power_kw = _power_kw(telemetry)
     motion = _motion(speed_kmh)
