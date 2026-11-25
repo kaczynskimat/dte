@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mqtt-broker:
     image: eclipse-mosquitto:2
@@ -14,3 +12,61 @@ services:
     container_name: dte-redis
     ports:
       - "6379:6379"
+
+  state-bridge:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: src/state_bridge/Dockerfile
+    environment:
+      MQTT_HOST: mqtt-broker
+      REDIS_HOST: redis-cache
+    depends_on:
+      - mqtt-broker
+      - redis-cache
+    restart: unless-stopped
+
+  prediction-worker:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: src/ml/Dockerfile
+    command:
+      - python
+      - -m
+      - src.ml.predictor
+      - --redis-host
+      - redis-cache
+      - --bus-id
+      - B208
+    depends_on:
+      - redis-cache
+      - state-bridge
+    restart: unless-stopped
+
+  replay-producer:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: src/replay/Dockerfile
+    command:
+      - python
+      - -m
+      - src.replay.producer
+      - --file
+      - /app/data/test_mission_2021-10-05.csv
+      - --broker-host
+      - mqtt-broker
+      - --bus-id
+      - B208
+      - --expected-route
+      - "83"
+      - --speed
+      - "${REPLAY_SPEED:-1}"
+      - --start-time
+      - "${REPLAY_START:-}"
+      - --end-time
+      - "${REPLAY_END:-}"
+    depends_on:
+      - mqtt-broker
+      - state-bridge

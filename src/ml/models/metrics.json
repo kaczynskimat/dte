@@ -1,0 +1,137 @@
+{
+  "objective": "mean_power_kw_next_10s",
+  "history_seconds": 60,
+  "forecast_seconds": 10,
+  "training_missions": [
+    "train_mission_2021-09-25.csv",
+    "train_mission_2021-09-29.csv"
+  ],
+  "validation_mission": "validation_mission_2021-10-04.csv",
+  "test_mission": "test_mission_2021-10-05.csv",
+  "training_rows": 93581,
+  "training_rows_by_mission": [
+    44083,
+    49498
+  ],
+  "validation_rows": 49946,
+  "test_rows": 51266,
+  "best_iteration": 1278,
+  "validation": {
+    "xgboost": {
+      "mae_kw": 17.918481570336734,
+      "rmse_kw": 26.462665566977535,
+      "r2": 0.8047753045926592
+    },
+    "persistence_baseline": {
+      "mae_kw": 39.507204881271775,
+      "rmse_kw": 61.43047119911538,
+      "r2": -0.05204731069022772
+    },
+    "recent_mean_baseline": {
+      "mae_kw": 46.97653916229528,
+      "rmse_kw": 69.66961482609358,
+      "r2": -0.35317634244760443
+    }
+  },
+  "test": {
+    "xgboost": {
+      "mae_kw": 16.769658308209713,
+      "rmse_kw": 24.347379214169063,
+      "r2": 0.8000259916111022
+    },
+    "persistence_baseline": {
+      "mae_kw": 35.22323666757695,
+      "rmse_kw": 54.86451214213686,
+      "r2": -0.015435062923103704
+    },
+    "recent_mean_baseline": {
+      "mae_kw": 41.77944273007452,
+      "rmse_kw": 61.9883546602752,
+      "r2": -0.2962516738928458
+    }
+  },
+  "anomaly_threshold_kw": 89.10464217376742,
+  "anomaly_percentile": 0.99,
+  "top_features": [
+    {
+      "feature": "traction_force_n",
+      "importance": 0.14298632740974426
+    },
+    {
+      "feature": "park_brake",
+      "importance": 0.06025859713554382
+    },
+    {
+      "feature": "wheel_speed_mean",
+      "importance": 0.05784955248236656
+    },
+    {
+      "feature": "power_kw",
+      "importance": 0.05742662027478218
+    },
+    {
+      "feature": "wheel_speed_fr",
+      "importance": 0.052611298859119415
+    },
+    {
+      "feature": "grid_available",
+      "importance": 0.043073199689388275
+    },
+    {
+      "feature": "wheel_speed_mean__min_10s",
+      "importance": 0.038099922239780426
+    },
+    {
+      "feature": "wheel_speed_fl",
+      "importance": 0.027626238763332367
+    },
+    {
+      "feature": "traction_force_n__max_60s",
+      "importance": 0.02539617009460926
+    },
+    {
+      "feature": "wheel_speed_rl",
+      "importance": 0.021195320412516594
+    },
+    {
+      "feature": "wheel_speed_rr",
+      "importance": 0.019606687128543854
+    },
+    {
+      "feature": "wheel_speed_ml",
+      "importance": 0.019121721386909485
+    },
+    {
+      "feature": "wheel_speed_mean__mean_10s",
+      "importance": 0.018471335992217064
+    },
+    {
+      "feature": "passengers__std_10s",
+      "importance": 0.016118021681904793
+    },
+    {
+      "feature": "wheel_speed_mr",
+      "importance": 0.01589633710682392
+    },
+    {
+      "feature": "longitude",
+      "importance": 0.015657005831599236
+    },
+    {
+      "feature": "acceleration_kmh_s",
+      "importance": 0.015107603743672371
+    },
+    {
+      "feature": "traction_force_n__max_10s",
+      "importance": 0.013367798179388046
+    },
+    {
+      "feature": "speed_kmh__min_10s",
+      "importance": 0.013252787292003632
+    },
+    {
+      "feature": "latitude",
+      "importance": 0.01201211754232645
+    }
+  ]
+}
