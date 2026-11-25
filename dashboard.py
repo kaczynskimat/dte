@@ -1882,7 +1882,11 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
     let passengerChange = 'board';
     let animationPassengerCount = 1;
     const passengerQueueSpacing = 0.72;
-    const passengerFlowSpeed = 1.3;
+    // Boarding/alighting always lasts this long on screen, whatever the number of passengers and the
+    // replay speed: the bus is held while it plays, so a long walk would leave it behind the data.
+    const PASSENGER_ANIMATION_SECONDS = 1.0;
+    const PASSENGER_DOOR_SHARE = 0.2;   // share of the animation spent opening (and again closing) the door
+    const PASSENGER_STRIDES_PER_METRE = 7.7;
     const passengerInsideZ = 0.55;
     // Queue on the pavement between the kerb and the shelter glass (world z ≈ 4.6 < glass at 5.0).
     const passengerQueueStartZ = 2.9;
@@ -1938,14 +1942,16 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
     function updatePassengerAnimation(elapsed) {
       if (!boardingActive) return;
       const time = elapsed;
-      const openingDuration = 0.9;
-      const closingDuration = 1.0;
+      const animationDuration = PASSENGER_ANIMATION_SECONDS;
+      const openingDuration = animationDuration * PASSENGER_DOOR_SHARE;
+      const closingDuration = animationDuration * PASSENGER_DOOR_SHARE;
       const queueLength = passengerQueueSpacing * (animationPassengerCount - 1);
       const pathDepth = passengerQueueStartZ - passengerInsideZ;
       const flowDistanceTotal = pathDepth + queueLength;
-      const flowDuration = flowDistanceTotal / passengerFlowSpeed;
+      const flowDuration = animationDuration - openingDuration - closingDuration;
+      // Everyone gets through in the same time, so a longer queue simply walks faster.
+      const passengerFlowSpeed = flowDistanceTotal / flowDuration;
       const closingStartsAt = openingDuration + flowDuration;
-      const animationDuration = closingStartsAt + closingDuration;
 
       if (time >= animationDuration) {
         // The door controller in the render loop closes the doors unless the twin says they are open.
@@ -2028,7 +2034,8 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
         model.group.visible = true;
         model.group.position.set(x, y, z);
         model.group.rotation.y = facing;
-        const passengerStride = Math.sin(flowElapsed * 10 - index * 0.55) * 0.42 * (flowActive ? 1 : 0);
+        // Leg swing follows the distance walked, so faster walking means quicker steps.
+        const passengerStride = Math.sin(flowDistance * PASSENGER_STRIDES_PER_METRE - index * 0.55) * 0.42 * (flowActive ? 1 : 0);
         model.legs[0].rotation.x = passengerStride;
         model.legs[1].rotation.x = -passengerStride;
         model.arms[0].rotation.x = -passengerStride * 0.55;
@@ -3659,7 +3666,7 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
         const delta = Math.min(remaining, 0.05);
         remaining -= delta;
         if (boardingActive) {
-          boardingElapsed += delta;
+          boardingElapsed += delta / timeScale;  // real seconds: see PASSENGER_ANIMATION_SECONDS
           updatePassengerAnimation(boardingElapsed);
         } else {
           processPassengerQueue();
