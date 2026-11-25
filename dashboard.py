@@ -3425,6 +3425,14 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
       return performance.now() - twin.lastMessageAt < 4000;
     }
 
+    function twinTimeScale() {
+      // While the replay drives the twin, scene time runs at the replay speed: at 5× the bus covers
+      // 5× the distance per second and doors, brakes, poles and passengers move 5× faster, so the
+      // animation keeps pace with the data instead of lagging and re-anchoring.
+      const replayDriving = twin.live && twin.online && twin.status === 'running';
+      return replayDriving ? Math.min(10, Math.max(0.25, twin.replaySpeed || 1)) : 1;
+    }
+
     function updateTwinScene(delta) {
       const speedKmh = liveSpeedKmh();
       const doorsOpen = isOn('status_doorIsOpen');
@@ -3634,8 +3642,8 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
 
     function renderModel() {
       requestAnimationFrame(renderModel);
-      // Simulate in small fixed steps so the twin keeps real time even when the browser throttles
-      // frames (background tab, hidden pane); after more than 2 s away it simply resumes.
+      // Simulate in small fixed steps so the twin keeps replay time (real time × replay speed) even when
+      // the browser throttles frames (background tab, hidden pane); after more than 2 s away it resumes.
       const rawDelta = animationClock.getDelta();
       // Frames stop while the Fleet view is hidden (Replay page, background tab); on return, catch up
       // by jumping to the current state rather than animating everything that happened meanwhile.
@@ -3645,7 +3653,8 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
         snapSceneToTwin();
       }
       const frameDelta = Math.min(rawDelta, 2);
-      let remaining = frameDelta;
+      const timeScale = twinTimeScale();
+      let remaining = frameDelta * timeScale;
       while (remaining > 1e-4) {
         const delta = Math.min(remaining, 0.05);
         remaining -= delta;
@@ -3661,7 +3670,7 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
       updateStopShelters();
       animationView.controls.update();
       animationView.renderer.render(animationView.scene, animationView.camera);
-      window.twinMap?.step(Math.min(1, frameDelta * 3));
+      window.twinMap?.step(Math.min(1, frameDelta * timeScale * 3));
       const now = performance.now();
       if (panelsDirty && now - lastPanelRender > 200) {
         panelsDirty = false;
