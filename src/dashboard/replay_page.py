@@ -17,21 +17,24 @@ from typing import Any
 
 import streamlit as st
 
+from src.dashboard.mission import BUS_ID, MISSION_PATH, REPLAY_END, REPLAY_START, TOPICS, mission_rows, producer_arguments
+
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 CONTROL_KEY = "ztbus:replay:control"
 MESSAGE_STREAM = "ztbus:replay:messages"
-TOPICS = ("location", "kinematics", "energy", "cabin", "odometry", "brakes")
-# Same env var and defaults as src/replay/producer.py so topics and the bridge's state key line up.
-BUS_ID = os.getenv("REPLAY_BUS_ID", "B208")
 TOPIC_PREFIX = f"ztbus/{BUS_ID}"
 # Hash written by src/state_bridge/bridge.py: the merged latest value of every replayed sensor field (the twin state).
 STATE_KEY = f"bus:{BUS_ID}:state"
+PREDICTION_KEY = f"bus:{BUS_ID}:prediction"
+SERVICES = ("mqtt-broker", "redis-cache", "state-bridge", "prediction-worker")
 PRODUCER_LOG_PATH = Path(tempfile.gettempdir()) / "dte-replay.log"
 DATASETS = (
-    ("clean_replay_mission.csv", "Replay MQTT e rota da página Fleet"),
-    ("train_mission.csv", "Missão de treino (ainda sem consumidor no dashboard)"),
-    ("mock_state.json", "Métricas estáticas da página Fleet"),
+    ("test_mission_2021-10-05.csv", "Replay MQTT, rota da página Fleet e teste final do modelo"),
+    ("train_mission_2021-09-25.csv", "Treino do modelo de potência"),
+    ("train_mission_2021-09-29.csv", "Treino do modelo de potência"),
+    ("validation_mission_2021-10-04.csv", "Validação e limiar de anomalia do modelo"),
+    ("mock_state.json", "Registo de exemplo da página Fleet antes do replay"),
 )
 
 
@@ -74,13 +77,9 @@ def _redis_is_live(redis_client: Any | None) -> bool:
         return False
 
 
-@st.cache_data(show_spinner=False)
 def _dataset_count() -> int:
-    path = PROJECT_DIR / "data" / "clean_replay_mission.csv"
-    if not path.exists():
-        return 0
-    with path.open("r", encoding="utf-8", newline="") as source:
-        return max(0, sum(1 for _ in csv.DictReader(source)))
+    """Samples in the replayed window (src/dashboard/mission.py)."""
+    return len(mission_rows())
 
 
 def _compose(*arguments: str, timeout: int = 90) -> subprocess.CompletedProcess[str]:
@@ -112,9 +111,9 @@ def _wait_for_services(redis_client: Any, timeout: float = 25.0, require_bridge:
 
 
 def _start_replay(redis_client: Any, speed: float) -> None:
-    with st.spinner("A iniciar o broker, Redis e a bridge…"):
+    with st.spinner("A iniciar o broker, o Redis, a bridge e o modelo de ML (na primeira vez as imagens Docker são construídas)…"):
         try:
-            result = _compose("up", "-d", "mqtt-broker", "redis-cache", "state-bridge")
+            result = _compose("up", "-d", *SERVICES, timeout=900)
         except (FileNotFoundError, subprocess.TimeoutExpired) as error:
             st.error(f"Não foi possível iniciar o Docker Compose: {error}")
             return
@@ -144,7 +143,7 @@ def _start_replay(redis_client: Any, speed: float) -> None:
 
         for key in redis_client.scan_iter(match="ztbus:replay:topic_latest:*"):
             redis_client.delete(key)
-        redis_client.delete(MESSAGE_STREAM, "ztbus:replay:topic_counts", STATE_KEY)
+        redis_client.delete(MESSAGE_STREAM, "ztbus:replay:topic_counts", STATE_KEY, PREDICTION_KEY)
 
         total = _dataset_count()
         redis_client.hset(
@@ -158,23 +157,23 @@ def _start_replay(redis_client: Any, speed: float) -> None:
             },
         )
 
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "REPLAY_REDIS_HOST": os.getenv("REPLAY_REDIS_HOST", "127.0.0.1"),
-                "REPLAY_REDIS_PORT": os.getenv("REPLAY_REDIS_PORT", "6379"),
-                "REPLAY_MQTT_HOST": os.getenv("REPLAY_MQTT_HOST", "127.0.0.1"),
-                "REPLAY_MQTT_PORT": os.getenv("REPLAY_MQTT_PORT", "1883"),
-            }
-        )
+        command = [
+            sys.executable, "-m", "src.replay.producer",
+            *producer_arguments(),
+            "--speed", str(speed),
+            "--broker-host", os.getenv("REPLAY_MQTT_HOST", "127.0.0.1"),
+            "--broker-port", os.getenv("REPLAY_MQTT_PORT", "1883"),
+            # Lets this page pause, resume, stop and change the speed of the running replay.
+            "--control-redis-host", os.getenv("REPLAY_REDIS_HOST", "127.0.0.1"),
+            "--control-redis-port", os.getenv("REPLAY_REDIS_PORT", "6379"),
+        ]
         log_path = PRODUCER_LOG_PATH
         redis_client.hdel(CONTROL_KEY, "error", "pid")
         try:
             with log_path.open("w", encoding="utf-8") as log_file:
                 process = subprocess.Popen(
-                    [sys.executable, str(PROJECT_DIR / "src" / "replay" / "producer.py")],
+                    command,
                     cwd=PROJECT_DIR,
-                    env=environment,
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
@@ -278,25 +277,27 @@ def _recent_messages(redis_client: Any, count: int = 24) -> list[dict[str, Any]]
     return messages
 
 
-def _render_topic_card(topic: str, payload: dict[str, Any] | None, count: int) -> None:
-    full_topic = f"{TOPIC_PREFIX}/{topic}"
-    active = payload is not None
-    state_label = "A receber" if active else "À espera"
-    payload_text = json.dumps(payload, ensure_ascii=False, indent=2) if payload else "Ainda sem mensagens neste tópico."
-    st.markdown(
-        f"""
-        <article class="replay-topic-card">
-          <div class="replay-topic-head">
-            <span class="replay-topic-indicator {'is-live' if active else ''}" aria-hidden="true"></span>
-            <code>{html.escape(full_topic)}</code>
-            <span class="replay-topic-state">{state_label}</span>
-          </div>
-          <div class="replay-topic-foot"><span>{count:,} mensagens nesta execução</span></div>
-          <details><summary>Último payload</summary><pre>{html.escape(payload_text)}</pre></details>
-        </article>
-        """,
-        unsafe_allow_html=True,
-    )
+def _topic_rows(redis_client: Any, connected: bool) -> list[dict[str, Any]]:
+    counts = redis_client.hgetall("ztbus:replay:topic_counts") if connected else {}
+    rows = []
+    for topic in TOPICS:
+        payload = _latest_payload(redis_client, topic) if connected else None
+        name = topic.rsplit("/", 1)[-1]
+        if payload is None:
+            value = ""
+        elif name in payload:
+            value = payload[name]
+        else:
+            value = json.dumps({k: v for k, v in payload.items() if k not in {"timestamp", "time_unix"}}, ensure_ascii=False)
+        rows.append(
+            {
+                "Tópico": f"{TOPIC_PREFIX}/{topic}",
+                "Mensagens": int(counts.get(f"{TOPIC_PREFIX}/{topic}", 0)),
+                "Último valor": "" if value is None else str(value),
+                "Amostra": (payload or {}).get("timestamp", ""),
+            }
+        )
+    return rows
 
 
 def _as_float(value: Any) -> float | None:
@@ -333,7 +334,19 @@ def _twin_metrics(state: dict[str, str]) -> list[tuple[str, str]]:
         ("Travão de paragem", _format_flag(state.get("halt_brake"), "Ativo", "Inativo")),
         ("Rede elétrica", _format_flag(state.get("grid_available"), "Disponível", "Indisponível")),
         ("Posição", position),
+        ("Estado operacional", (state.get("operational_state") or "—").split(" | ")[0]),
+        ("Previsão ML (10 s)", _ml_summary(state)),
     ]
+
+
+def _ml_summary(state: dict[str, str]) -> str:
+    status = state.get("ml_status")
+    if status == "warming_up":
+        return f"A aquecer {state.get('ml_samples_collected', 0)}/{state.get('ml_samples_required', 60)} s"
+    if status == "ready":
+        forecast = _format_number(state.get("ml_predicted_mean_power_kw_next_10s"), 1, "kW")
+        return f"{forecast} · anomalia" if state.get("ml_is_anomaly") == "1" else forecast
+    return "—"
 
 
 def _render_twin_state(redis_client: Any, connected: bool) -> None:
@@ -565,14 +578,14 @@ def _render_controls_card(redis_client: Any, connected: bool, status: str, contr
                 redis_client.hset(CONTROL_KEY, mapping={"status": "stopped"})
             with st.spinner("A desligar os serviços…"):
                 try:
-                    result = _compose("stop", "state-bridge", "mqtt-broker", "redis-cache")
+                    result = _compose("stop", *reversed(SERVICES))
                 except (FileNotFoundError, subprocess.TimeoutExpired) as error:
                     st.error(f"Não foi possível parar o Docker Compose: {error}")
                 else:
                     if result.returncode != 0:
                         st.error(result.stderr.strip() or "Não foi possível parar os serviços.")
                     else:
-                        st.success("Broker, Redis e bridge parados.")
+                        st.success("Broker, Redis, bridge e modelo de ML parados.")
             st.rerun()
     return speed
 
@@ -584,7 +597,7 @@ def _render_flow_card(redis_client: Any, connected: bool, status: str, speed: fl
         received = sum(int(value) for value in topic_counts.values()) if topic_counts else 0
         active_topics = sum(1 for topic in TOPICS if _latest_payload(redis_client, topic)) if connected else 0
         st.markdown(
-            f'<div class="flow-metrics"><div class="flow-metric"><span>Mensagens recebidas</span><strong>{received:,}</strong></div><div class="flow-metric"><span>Tópicos ativos</span><strong>{active_topics} / 6</strong></div></div>',
+            f'<div class="flow-metrics"><div class="flow-metric"><span>Mensagens recebidas</span><strong>{received:,}</strong></div><div class="flow-metric"><span>Tópicos ativos</span><strong>{active_topics} / {len(TOPICS)}</strong></div></div>',
             unsafe_allow_html=True,
         )
         if refresh is None:
@@ -652,13 +665,13 @@ def render_replay_page() -> None:
 
     st.divider()
     st.subheader("Tópicos MQTT")
-    topic_columns = st.columns(2)
-    topic_counts = redis_client.hgetall("ztbus:replay:topic_counts") if connected else {}
-    for position, topic in enumerate(TOPICS):
-        payload = _latest_payload(redis_client, topic) if connected else None
-        count = int(topic_counts.get(f"{TOPIC_PREFIX}/{topic}", 0))
-        with topic_columns[position % 2]:
-            _render_topic_card(topic, payload, count)
+    window = " a ".join(part for part in (REPLAY_START, REPLAY_END) if part) or "missão completa"
+    st.markdown(
+        f'<p class="flow-caption">Um tópico por sensor (<code>docs/sensor_streams.md</code>) · '
+        f"<code>{html.escape(MISSION_PATH.name)}</code> · {html.escape(window)}</p>",
+        unsafe_allow_html=True,
+    )
+    st.dataframe(_topic_rows(redis_client, connected), hide_index=True, width="stretch", height=420)
 
     st.divider()
     st.subheader("Mensagens recentes")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import math
 from pathlib import Path
@@ -12,7 +11,9 @@ import streamlit as st
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-REPLAY_PATH = PROJECT_DIR / "data" / "clean_replay_mission.csv"
+# Route, stops and the replayed rows come from the same mission file and time window the dashboard
+# hands to the producer (src/dashboard/mission.py), so the map and the 3D scene match the replay.
+from src.dashboard.mission import MISSION_PATH as REPLAY_PATH, mission_rows  # noqa: E402
 MOCK_STATE_PATH = PROJECT_DIR / "data" / "mock_state.json"
 ASSETS_DIR = PROJECT_DIR / "src" / "dashboard" / "assets"
 
@@ -92,13 +93,7 @@ def _odometer(rows: list[dict[str, Any]]) -> list[float]:
     return distances
 
 
-def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
-    with path.open("r", encoding="utf-8", newline="") as data_file:
-        return list(csv.DictReader(data_file))
-
-
-def _read_csv_route(path: Path) -> list[list[float]]:
-    rows = _read_csv_rows(path)
+def _read_csv_route(rows: list[dict[str, Any]]) -> list[list[float]]:
     distances = _odometer(rows)
     route: list[list[float]] = []
     for row, distance in zip(rows, distances):
@@ -118,9 +113,9 @@ def _load_stop_visits() -> list[dict[str, Any]]:
     that sample for the dwell with open doors gives where the bus really stood; with no dwell within
     60 m the bus passed without stopping.
     """
-    if not REPLAY_PATH.exists():
+    rows = list(mission_rows())
+    if not rows:
         return []
-    rows = _read_csv_rows(REPLAY_PATH)
     distances = _odometer(rows)
     visits: list[dict[str, Any]] = []
     for index, row in enumerate(rows):
@@ -180,10 +175,9 @@ def _read_mock_route(path: Path) -> list[list[float]]:
 
 
 def _load_route() -> list[list[float]]:
-    if REPLAY_PATH.exists():
-        route = _read_csv_route(REPLAY_PATH)
-        if len(route) >= 2:
-            return route
+    route = _read_csv_route(list(mission_rows()))
+    if len(route) >= 2:
+        return route
 
     if MOCK_STATE_PATH.exists():
         route = _read_mock_route(MOCK_STATE_PATH)
@@ -727,6 +721,8 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
     #twin-ml-value { color: #8b99a2; font-weight: 700; }
     #twin-ml-row.is-ready #twin-ml-value { color: #1e2b34; }
     #twin-ml-row.is-alert #twin-ml-value { color: #b91c1c; }
+    #twin-ml-detail { margin-top: 3px; color: #6b7a85; font-size: 9px; font-variant-numeric: tabular-nums; }
+    #twin-ml-detail.is-alert { padding: 3px 6px; border-radius: 6px; background: #fde4e4; color: #9b1c1c; font-weight: 700; }
     #twin-state-card.state-boarding { --state-color: #d97706; }
     #twin-state-card.state-cruising { --state-color: #0878bd; }
     #twin-state-card.state-regenerating { --state-color: #16a34a; }
@@ -831,7 +827,8 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
           <small id="twin-state-source">State machine</small>
           <div id="twin-state-main"><span class="twin-state-dot" aria-hidden="true"></span><strong id="twin-state-value">—</strong><span id="twin-state-since"></span></div>
           <div id="twin-state-tags"></div>
-          <div id="twin-ml-row"><span>ML prediction</span><strong id="twin-ml-value">Model not connected</strong></div>
+          <div id="twin-ml-row"><span>Power next 10 s · ML</span><strong id="twin-ml-value">Model not connected</strong></div>
+          <div id="twin-ml-detail" hidden></div>
         </div>
         <div id="stop-banner" class="is-hidden" role="status" aria-live="polite">
           <span id="stop-banner-icon" aria-hidden="true">H</span>
@@ -2858,11 +2855,11 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
     const DEPART_KMH = 4;
     const fieldMap = {
       time_unix: 'time_unix',
-      latitude: 'latitude', longitude: 'longitude', altitude: 'gnss_altitude',
+      latitude: 'latitude', longitude: 'longitude', altitude: 'gnss_altitude', altitude_m: 'gnss_altitude',
       speed_kmh: 'speed_kmh', heading_deg: 'heading_deg',
       power_kw: 'power_kw', grid_available: 'status_gridIsAvailable',
       doors_open: 'status_doorIsOpen', passengers: 'itcs_numberOfPassengers', temp_celsius: 'temp_celsius',
-      stop_name: 'itcs_stopName', bus_route: 'itcs_busRoute',
+      stop_name: 'itcs_stopName', bus_route: 'itcs_busRoute', itcs_stopName: 'itcs_stopName', itcs_busRoute: 'itcs_busRoute',
       steering_angle_rad: 'odometry_steeringAngle', articulation_angle_rad: 'odometry_articulationAngle',
       wheel_speed_fl: 'odometry_wheelSpeed_fl', wheel_speed_fr: 'odometry_wheelSpeed_fr',
       wheel_speed_ml: 'odometry_wheelSpeed_ml', wheel_speed_mr: 'odometry_wheelSpeed_mr',
@@ -2894,8 +2891,9 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
       lastFix: null,            // previous GNSS fix, to estimate speed if the speed signal is missing
       gpsSpeedKmh: null
     };
-    // Output of the rule-based state machine (src/state_machine), computed by the state bridge and
-    // streamed as ztbus/<bus>/state messages. Kept apart from `telemetry`, which mirrors raw sensors.
+    // Output of the rule-based state machine (src/state_machine): the bridge derives it on every
+    // replay tick as operational_state and streams changes as ztbus/<bus>/state messages. Kept apart
+    // from `telemetry`, which mirrors the raw sensors.
     const twinState = { inferred: __TWIN_STATE_JSON__, since: '', ml: null, changed: false };
     const pendingPassengerChanges = [];
     let panelsDirty = true;
@@ -3202,7 +3200,7 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
 
     function applyFields(fields) {
       if (!fields || typeof fields !== 'object') return;
-      if ('inferred_state' in fields) applyInferredState(fields.inferred_state);
+      if ('operational_state' in fields) applyInferredState(fields.operational_state);
       const changes = {};
       for (const [field, value] of Object.entries(fields)) {
         const key = fieldMap[field];
@@ -3361,6 +3359,7 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
     const stateSource = document.getElementById('twin-state-source');
     const mlRow = document.getElementById('twin-ml-row');
     const mlValue = document.getElementById('twin-ml-value');
+    const mlDetail = document.getElementById('twin-ml-detail');
     const stateTagLabels = {
       Forward: 'Forward', Reverse: 'Reverse', Stopped: 'Stopped',
       Straight: 'Straight', TurningLeft: 'Turning left', TurningRight: 'Turning right',
@@ -3394,18 +3393,34 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
         void stateCard.offsetWidth;
         stateCard.classList.add('flash');
       }
-      // Placeholder for the ML inference service (issue #8): it writes ml_prediction / anomaly_score
-      // into bus:<id>:state and the feed forwards them here.
+      // Power forecast from the prediction worker (src/ml/predictor.py), which writes ml_* fields into
+      // bus:<id>:state on every tick; the feed forwards them on every poll.
       const ml = twinState.ml;
+      const kw = value => { const number = toNumber(value); return number === null ? null : `${number.toFixed(1)} kW`; };
       let mlText = 'Model not connected';
+      let detailText = '';
       let mlState = '';
-      if (ml) {
-        const score = toNumber(ml.anomaly_score);
-        const prediction = ml.ml_prediction;
-        mlText = [prediction, score === null ? null : `anomaly ${score.toFixed(2)}`].filter(Boolean).join(' · ') || '—';
-        mlState = ml.ml_anomaly === '1' || ml.ml_anomaly === 1 ? 'alert' : 'ready';
+      if (ml && ml.ml_status === 'warming_up') {
+        mlText = `Warming up · ${ml.ml_samples_collected ?? 0}/${ml.ml_samples_required ?? 60} s`;
+        detailText = 'Needs 60 s of continuous telemetry';
+      } else if (ml && ml.ml_status === 'ready') {
+        mlText = kw(ml.ml_predicted_mean_power_kw_next_10s) ?? '—';
+        mlState = 'ready';
+        const error = kw(ml.ml_absolute_error_kw);
+        const threshold = kw(ml.ml_anomaly_threshold_kw);
+        if (ml.ml_is_anomaly === '1') {
+          mlState = 'alert';
+          detailText = `Anomaly: last forecast off by ${error}${threshold ? ` (limit ${threshold})` : ''}`;
+        } else if (error) {
+          detailText = `Last forecast off by ${error}${threshold ? ` · limit ${threshold}` : ''}`;
+        } else {
+          detailText = 'First forecast is checked after 10 s';
+        }
       }
       if (mlValue.textContent !== mlText) mlValue.textContent = mlText;
+      if (mlDetail.textContent !== detailText) mlDetail.textContent = detailText;
+      mlDetail.hidden = !detailText;
+      mlDetail.classList.toggle('is-alert', mlState === 'alert');
       mlRow.classList.toggle('is-ready', mlState === 'ready');
       mlRow.classList.toggle('is-alert', mlState === 'alert');
     }

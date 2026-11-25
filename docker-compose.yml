@@ -42,6 +42,10 @@ services:
       - redis-cache
       - --bus-id
       - B208
+      # A tick arrives every 100 ms at 10x and a forecast takes up to ~65 ms; a 50 ms poll could
+      # miss a tick, which resets the 60 s history.
+      - --poll-interval
+      - "0.01"
     depends_on:
       - redis-cache
       - state-bridge

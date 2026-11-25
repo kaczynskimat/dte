@@ -10,25 +10,31 @@ out of the capped stream, also receives the merged ``bus:<id>:state`` hash to re
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-REPLAY_PATH = Path(__file__).resolve().parents[2] / "data" / "clean_replay_mission.csv"
+from src.dashboard.mission import BUS_ID
+
 CONTROL_KEY = "ztbus:replay:control"
 MESSAGE_STREAM = "ztbus:replay:messages"
-BUS_ID = os.getenv("REPLAY_BUS_ID", "B208")
 STATE_KEY = f"bus:{BUS_ID}:state"
 FEED_HOST = os.getenv("TWIN_FEED_HOST", "127.0.0.1")
 FEED_PORT = int(os.getenv("TWIN_FEED_PORT", "8503"))
 MAX_MESSAGES = 600
-# Written into the state hash by the ML inference service (issue #8); forwarded on every poll.
-ML_FIELDS = ("ml_prediction", "anomaly_score", "ml_anomaly")
+# Written into the state hash by the prediction worker (src/ml/predictor.py); forwarded on every poll.
+ML_FIELDS = (
+    "ml_status",
+    "ml_samples_collected",
+    "ml_samples_required",
+    "ml_predicted_mean_power_kw_next_10s",
+    "ml_absolute_error_kw",
+    "ml_anomaly_threshold_kw",
+    "ml_is_anomaly",
+)
 
 
 def _redis_client() -> Any | None:
@@ -63,48 +69,6 @@ def _decode(raw: str | None) -> Any:
         return raw
 
 
-_itcs_lock = threading.Lock()
-_itcs_by_time: dict[int, tuple[str | None, str | None]] | None = None
-
-
-def _itcs_index() -> dict[int, tuple[str | None, str | None]]:
-    """time_unix -> (stop name, route) from the replayed dataset.
-
-    The producer publishes ``stop_name`` / ``bus_route`` in each ``cabin`` message; for messages
-    without them (e.g. an older producer) the feed fills them in from the same CSV row, matched by
-    ``time_unix``. Values the producer publishes itself always win.
-    """
-    global _itcs_by_time
-    with _itcs_lock:
-        if _itcs_by_time is None:
-            index: dict[int, tuple[str | None, str | None]] = {}
-            try:
-                with REPLAY_PATH.open("r", encoding="utf-8", newline="") as source:
-                    for row in csv.DictReader(source):
-                        try:
-                            stamp = int(float(row.get("time_unix") or ""))
-                        except ValueError:
-                            continue
-                        stop = (row.get("itcs_stopName") or "").strip()
-                        route = (row.get("itcs_busRoute") or "").strip()
-                        index[stamp] = (None if stop in {"", "-"} else stop, None if route in {"", "-"} else route)
-            except OSError:
-                pass
-            _itcs_by_time = index
-        return _itcs_by_time
-
-
-def _with_itcs(topic: str, payload: Any) -> Any:
-    if not topic.endswith("/cabin") or not isinstance(payload, dict):
-        return payload
-    try:
-        stamp = int(float(payload.get("time_unix")))
-    except (TypeError, ValueError):
-        return payload
-    stop, route = _itcs_index().get(stamp, (None, None))
-    return {"stop_name": stop, "bus_route": route, **payload}
-
-
 def build_snapshot(client: Any, after: str | None) -> dict[str, Any]:
     """Everything the page needs for one poll; never raises for Redis being down."""
     if client is None:
@@ -130,7 +94,7 @@ def build_snapshot(client: Any, after: str | None) -> dict[str, Any]:
                 {
                     "id": entry_id,
                     "topic": fields.get("topic", ""),
-                    "payload": _with_itcs(fields.get("topic", ""), _decode(fields.get("payload"))),
+                    "payload": _decode(fields.get("payload")),
                 }
                 for entry_id, fields in entries
             ],
@@ -139,8 +103,7 @@ def build_snapshot(client: Any, after: str | None) -> dict[str, Any]:
             "ml": dict(zip(ML_FIELDS, client.hmget(STATE_KEY, ML_FIELDS))),
         }
         if gap:
-            state = client.hgetall(STATE_KEY)
-            snapshot["state"] = _with_itcs("/cabin", state) if state else state
+            snapshot["state"] = client.hgetall(STATE_KEY)
         return snapshot
     except Exception as error:  # Redis stopped or restarting: the page falls back to sample data.
         return {"online": False, "reason": type(error).__name__}

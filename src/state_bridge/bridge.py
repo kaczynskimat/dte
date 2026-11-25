@@ -1,15 +1,16 @@
 """MQTT -> Redis state bridge for the ZTBus digital twin.
 
-Every message on ``ztbus/<bus>/...`` (one topic per sensor, see docs/sensor_streams.md) is:
+Every message on ``ztbus/<bus>/...`` (one topic per sensor, see docs/sensor_streams.md) is at once:
 
-* merged into the hash ``bus:<bus>:state``, the current representation of the bus,
 * kept as the latest payload of its topic (``ztbus:replay:topic_latest:<topic>``),
-* appended to the capped stream ``ztbus:replay:messages`` the dashboard follows.
+* appended to the capped stream ``ztbus:replay:messages`` the dashboard follows live,
+* collected for the one-second situation it belongs to.
 
-``ztbus/<bus>/replay/tick`` closes one complete one-second situation. On each tick the rule-based
-state machine (``src.state_machine.infer_state``) runs on the full state and replaces
-``operational_state``; when that state changes it is also appended to the stream as a
-``ztbus/<bus>/state`` message, so the dashboard sees transitions in order with the telemetry.
+``ztbus/<bus>/replay/tick`` closes that situation: its readings, the tick itself and the
+``operational_state`` derived by the rule-based state machine (``src.state_machine.infer_state``)
+replace the old values of ``bus:<bus>:state`` in one transaction. Readers of the hash (the ML worker,
+the dashboard) therefore never see a mix of two seconds, however fast the replay runs. When the
+operational state changes it is also appended to the stream as a ``ztbus/<bus>/state`` message.
 """
 
 from __future__ import annotations
@@ -73,18 +74,30 @@ def _append_to_stream(r: redis.Redis, topic: str, data: Any) -> None:
     )
 
 
-def apply_tick(r: redis.Redis, bus_id: str, tick: dict[str, Any]) -> str | None:
-    """Derive the operational state of the complete situation; returns it only when it changed."""
+# Readings received since the last tick, per bus: the situation the next tick will apply.
+_pending: dict[str, dict[str, Any]] = {}
+
+
+def apply_tick(
+    r: redis.Redis,
+    bus_id: str,
+    tick: dict[str, Any],
+    readings: dict[str, Any],
+) -> str | None:
+    """Apply one complete situation atomically; returns the operational state only when it changed."""
     key = state_key(bus_id)
-    state = r.hgetall(key)
-    operational_state = infer_state(state)
-    previous = state.get("operational_state")
-    r.hset(key, mapping={
+    previous_state = r.hgetall(key)
+    situation = {**readings, **_flatten(tick)}
+    operational_state = infer_state({**previous_state, **situation})
+    situation.update({
         "operational_state": operational_state,
         "representation_timestamp": tick.get("timestamp", ""),
         "representation_sequence": tick.get("snapshot_sequence", ""),
     })
-    if operational_state == previous:
+    with r.pipeline(transaction=True) as pipeline:
+        pipeline.hset(key, mapping=situation)
+        pipeline.execute()
+    if operational_state == previous_state.get("operational_state"):
         return None
     _append_to_stream(r, f"ztbus/{bus_id}/state", {
         "timestamp": tick.get("timestamp"),
@@ -94,8 +107,14 @@ def apply_tick(r: redis.Redis, bus_id: str, tick: dict[str, Any]) -> str | None:
     return operational_state
 
 
-def handle_message(r: redis.Redis, topic: str, raw_payload: bytes) -> str | None:
+def handle_message(
+    r: redis.Redis,
+    topic: str,
+    raw_payload: bytes,
+    pending: dict[str, dict[str, Any]] | None = None,
+) -> str | None:
     """Store one MQTT message in Redis; returns the operational state when a tick changed it."""
+    pending = _pending if pending is None else pending
     payload = raw_payload.decode("utf-8")
     try:
         data: Any = json.loads(payload)
@@ -104,10 +123,13 @@ def handle_message(r: redis.Redis, topic: str, raw_payload: bytes) -> str | None
         data = {"value": payload}  # still shown on the Replay page, but never merged into the state
         is_telemetry = False
 
-    # Every message is visible on the Replay page, even ones that do not describe a bus.
-    r.set(f"{TOPIC_LATEST_PREFIX}{topic}", json.dumps(data, separators=(",", ":")))
-    _append_to_stream(r, topic, data)
-    r.hincrby(TOPIC_COUNTS_KEY, topic, 1)
+    # Every message is visible on the Replay page and the live twin, even ones that do not describe
+    # a bus; one round trip per message keeps the bridge ahead of fast replays.
+    with r.pipeline(transaction=False) as pipeline:
+        pipeline.set(f"{TOPIC_LATEST_PREFIX}{topic}", json.dumps(data, separators=(",", ":")))
+        _append_to_stream(pipeline, topic, data)
+        pipeline.hincrby(TOPIC_COUNTS_KEY, topic, 1)
+        pipeline.execute()
 
     parts = topic.split("/")
     if len(parts) < 3 or not is_telemetry:
@@ -115,9 +137,14 @@ def handle_message(r: redis.Redis, topic: str, raw_payload: bytes) -> str | None
         return None
 
     bus_id = parts[1]
-    r.hset(state_key(bus_id), mapping=_flatten(data))
     if topic.endswith(TICK_SUFFIX):
-        return apply_tick(r, bus_id, data)
+        return apply_tick(r, bus_id, data, pending.pop(bus_id, {}))
+    if "/sensors/" in topic:
+        # Held until the tick closes this second (see the module docstring).
+        pending.setdefault(bus_id, {}).update(_flatten(data))
+        return None
+    # Replay status and other bus-level messages are not part of a timed situation.
+    r.hset(state_key(bus_id), mapping=_flatten(data))
     return None
 
 

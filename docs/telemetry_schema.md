@@ -64,7 +64,7 @@ value, so the state keeps the last known route and stop.
 
 | Key | Type | Written by | Content |
 |---|---|---|---|
-| `bus:<bus>:state` | hash | state bridge, ML worker | The current representation: latest value of every sensor (null → `""`), `timestamp` / `time_unix` / `snapshot_sequence` of the last tick, `operational_state`, `representation_timestamp`, `representation_sequence`, and the `ml_*` fields below |
+| `bus:<bus>:state` | hash | state bridge, ML worker | The current representation, updated in one transaction per `replay/tick` so readers never see two seconds mixed: latest value of every sensor (null → `""`), `timestamp` / `time_unix` / `snapshot_sequence` of the last tick, `operational_state`, `representation_timestamp`, `representation_sequence`, and the `ml_*` fields below |
 | `bus:<bus>:prediction` | hash | ML worker | The same ML result without the `ml_` prefix |
 | `ztbus:replay:messages` | stream (capped at ~5000) | state bridge | Every MQTT message (`topic`, `payload`, `received_at`), plus a `ztbus/<bus>/state` entry each time `operational_state` changes |
 | `ztbus:replay:topic_latest:<topic>` | string | state bridge | Latest JSON payload per topic |
