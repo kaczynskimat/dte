@@ -14,7 +14,7 @@ services:
       - "6379:6379"
 
   state-bridge:
-    profiles: ["demo"]
+    profiles: ["demo", "dashboard"]
     # Python runs as PID 1 without a SIGTERM handler; init makes `docker compose stop` immediate.
     init: true
     build:
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
 
   prediction-worker:
-    profiles: ["demo"]
+    profiles: ["demo", "dashboard"]
     init: true
     build:
       context: .
@@ -78,3 +78,28 @@ services:
     depends_on:
       - mqtt-broker
       - state-bridge
+
+  # The web dashboard (Fleet + Replay pages). Start it with `docker compose --profile dashboard up`;
+  # its Replay page runs the producer itself, so the `demo` replay-producer is not needed alongside.
+  dashboard:
+    profiles: ["dashboard"]
+    init: true
+    build:
+      context: .
+      dockerfile: src/dashboard/Dockerfile
+    environment:
+      REPLAY_MQTT_HOST: mqtt-broker
+      REPLAY_REDIS_HOST: redis-cache
+      REPLAY_START: ${REPLAY_START-2021-10-05 07:00:00}
+      REPLAY_END: ${REPLAY_END-2021-10-05 09:00:00}
+    volumes:
+      - ./data:/app/data:ro  # every prepared dataset, for the Replay page's table
+    ports:
+      - "8501:8501"  # dashboard
+      - "8503:8503"  # live twin feed polled by the Fleet page
+    depends_on:
+      - mqtt-broker
+      - redis-cache
+      - state-bridge
+      - prediction-worker
+    restart: unless-stopped

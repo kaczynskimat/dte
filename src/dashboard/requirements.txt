@@ -1,0 +1,6 @@
+streamlit==1.67.0
+streamlit-autorefresh==1.0.1
+# The Replay page runs src/replay/producer.py in this same environment.
+pandas==3.1.1
+paho-mqtt==2.1.0
+redis==7.1.0

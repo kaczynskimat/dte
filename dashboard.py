@@ -3567,7 +3567,7 @@ def _dashboard_html(route: list[list[float]], metrics: dict[str, Any], feed_port
       const control = data.control || {};
       twin.status = control.status || 'idle';
       twin.replaySpeed = Number(control.speed) || 1;
-      // started_at changes on every "Iniciar replay"; a page opened before it must forget the old run.
+      // started_at changes on every "Start replay"; a page opened before it must forget the old run.
       if (control.started_at && control.started_at !== twin.startedAt) {
         twin.startedAt = control.started_at;
         clearTwin();
@@ -3842,7 +3842,7 @@ def main() -> None:
     _load_styles()
 
     page = st.radio(
-        "Páginas da dashboard",
+        "Dashboard pages",
         ("Fleet", "Replay"),
         horizontal=True,
         label_visibility="collapsed",
@@ -3856,7 +3856,7 @@ def main() -> None:
         st.iframe(fleet_html, height=900)
     if page == "Fleet":
         if fleet_html is None:
-            st.error("Não encontrei pontos suficientes para desenhar a rota do autocarro.")
+            st.error("Not enough GPS points to draw the bus route.")
     else:
         st.markdown(
             '<style>div[data-testid="stElementContainer"]:has(> iframe[data-testid="stIFrame"]) { display: none !important; }</style>',

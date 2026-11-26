@@ -39,9 +39,41 @@ Documentation:
 
 ## Running it
 
-Requirements: Docker (with Compose) and Python 3.11+.
+Every component has its own Docker image (`src/<component>/Dockerfile`, Python 3.13 with pinned
+requirements). `docker-compose.yml` has two profiles:
 
-### With the dashboard
+| Profile | Starts | Use it for |
+|---|---|---|
+| `dashboard` | broker, Redis, state bridge, prediction worker, dashboard | Watching and controlling the twin in the browser |
+| `demo` | broker, Redis, state bridge, prediction worker, replay producer | A headless replay of the whole mission |
+
+Do not start both profiles together: the dashboard runs its own producer.
+
+### With the dashboard (Docker)
+
+Requirements: Docker with Compose.
+
+```bash
+docker compose --profile dashboard up -d --build
+```
+
+Open <http://localhost:8501>, go to the **Replay** page and press *Start replay*. Then switch to
+**Fleet** to watch the twin. The speed slider changes the replay speed while it runs. Port 8503 is
+the live feed the Fleet page polls, so it must stay published.
+
+To stop everything:
+
+```bash
+docker compose --profile dashboard down
+```
+
+The dashboard replays `data/test_mission_2021-10-05.csv` from 07:00 to 09:00 by default. Set
+`REPLAY_START` / `REPLAY_END` before `up` (for example `REPLAY_START="2021-10-05 12:00:00"`) to
+pick another window, or set both to empty strings for the whole day.
+
+### With the dashboard (local Python, for development)
+
+Requirements: Docker with Compose, and Python 3.11+.
 
 ```bash
 pip install -r requirements.txt
@@ -51,14 +83,9 @@ pip install -r requirements.txt
 streamlit run dashboard.py
 ```
 
-Open the **Replay** page and press *Iniciar replay*. The dashboard starts the broker, Redis, the
-state bridge and the prediction worker with Docker Compose (the first time builds the images). It
-then runs the producer locally. Switch to **Fleet** to watch the twin. The speed slider changes the
-replay speed while it runs.
-
-The dashboard replays `data/test_mission_2021-10-05.csv` from 07:00 to 09:00 by default. Set
-`REPLAY_START` / `REPLAY_END` (for example `REPLAY_START="2021-10-05 12:00:00"`) to pick another
-window, or set both to empty strings for the whole day.
+Here the Replay page starts the broker, Redis, the bridge and the prediction worker itself with
+Docker Compose, and runs the producer locally. Code changes show up on the next page reload,
+without rebuilding an image.
 
 ### Without the dashboard
 
@@ -66,8 +93,8 @@ window, or set both to empty strings for the whole day.
 REPLAY_SPEED=10 docker compose --profile demo up --build
 ```
 
-This runs every service, including the producer, in Docker. Follow the state with
-`redis-cli HGETALL bus:B208:state`.
+This replays the whole mission headless. Follow the state with
+`docker compose exec redis-cache redis-cli HGETALL bus:B208:state`.
 
 ### Configuration
 
@@ -75,12 +102,14 @@ This runs every service, including the producer, in Docker. Follow the state wit
 |---|---|---|
 | `MQTT_HOST`, `MQTT_PORT` | `localhost`, `1883` | state bridge (`mqtt-broker` inside Compose) |
 | `REDIS_HOST`, `REDIS_PORT` | `localhost`, `6379` | state bridge (`redis-cache` inside Compose) |
-| `REPLAY_MQTT_HOST`, `REPLAY_REDIS_HOST` (+ `_PORT`) | `127.0.0.1` | dashboard and the producer it starts |
+| `REPLAY_MQTT_HOST`, `REPLAY_REDIS_HOST` (+ `_PORT`) | `127.0.0.1` (`mqtt-broker` / `redis-cache` in Compose) | dashboard and the producer it starts |
 | `REPLAY_BUS_ID` | `B208` | dashboard |
 | `REPLAY_FILE` | `data/test_mission_2021-10-05.csv` | dashboard |
 | `REPLAY_START`, `REPLAY_END` | `2021-10-05 07:00:00`, `2021-10-05 09:00:00` in the dashboard; whole mission in Compose | dashboard, Compose |
 | `REPLAY_SPEED` | `1` | Compose |
 | `TWIN_FEED_PORT` | `8503` | local JSON feed polled by the Fleet page |
+| `TWIN_FEED_HOST` | `127.0.0.1` (`0.0.0.0` in the dashboard image) | interface the feed listens on |
+| `DASHBOARD_MANAGES_SERVICES` | `1` (`0` in the dashboard image) | whether the Replay page starts and stops the Compose services itself |
 
 ## Tests
 

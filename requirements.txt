@@ -1,5 +1,1 @@
-streamlit>=1.67
-paho-mqtt
-redis
-streamlit-autorefresh
-pandas==3.1.1
+-r src/dashboard/requirements.txt
