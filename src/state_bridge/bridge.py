@@ -3,7 +3,7 @@ import redis
 import json
 import os
 
-from src.state_machine import infer_state
+from src.state_machine import infer_state, infer_transition
 from src.state_bridge.quality import evaluate_quality
 
 
@@ -50,13 +50,22 @@ def on_message(client, userdata, msg):
         if topic.endswith("/replay/tick"):
             telemetry = r.hgetall(key)
             sensor_times = r.hgetall(sensor_times_key)
+            previous_state = telemetry.get("operational_state")
+            current_state = infer_state(telemetry, previous_state)
+            transition = infer_transition(previous_state, current_state)
             quality = evaluate_quality(
                 telemetry,
                 sensor_times,
                 data.get("time_unix", data.get("timestamp")),
             )
             r.hset(key, mapping={
-                "operational_state": infer_state(telemetry),
+                "operational_state": current_state,
+                "previous_operational_state": previous_state or "",
+                "state_transition": transition,
+                "state_changed": int(
+                    transition not in {"Initialized", "Unchanged"}
+                ),
+                "state_transition_timestamp": data.get("timestamp", ""),
                 "representation_timestamp": data.get("timestamp", ""),
                 "representation_sequence": data.get("snapshot_sequence", ""),
                 **quality,
