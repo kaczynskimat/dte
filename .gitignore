@@ -4,3 +4,4 @@ data/B*.csv
 # Python bytecode generated while running the training and tests.
 __pycache__/
 *.py[cod]
+.DS_Store
