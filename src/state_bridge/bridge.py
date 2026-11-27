@@ -4,6 +4,7 @@ import json
 import os
 
 from src.state_machine import infer_state
+from src.state_bridge.quality import evaluate_quality
 
 
 r: redis.Redis
@@ -31,16 +32,34 @@ def on_message(client, userdata, msg):
             else:
                 clean_data[k] = v # keep ints, floats, strings as-is
 
-        bus_id = topic.split('/')[1]  # grabs "B208"
+        topic_parts = topic.split('/')
+        bus_id = topic_parts[1]  # grabs "B208"
         key = f"bus:{bus_id}:state"
+        sensor_times_key = f"bus:{bus_id}:sensor:timestamps"
+
+        # A new replay must not inherit sensor readings from the previous run.
+        if topic.endswith("/replay") and data.get("replay_status") == "running":
+            r.delete(key, sensor_times_key)
 
         r.hset(key, mapping=clean_data)
+        if len(topic_parts) >= 4 and topic_parts[2] == "sensors":
+            sensor_name = topic_parts[3]
+            sensor_time = data.get("time_unix", data.get("timestamp"))
+            if sensor_time is not None:
+                r.hset(sensor_times_key, sensor_name, sensor_time)
         if topic.endswith("/replay/tick"):
             telemetry = r.hgetall(key)
+            sensor_times = r.hgetall(sensor_times_key)
+            quality = evaluate_quality(
+                telemetry,
+                sensor_times,
+                data.get("time_unix", data.get("timestamp")),
+            )
             r.hset(key, mapping={
                 "operational_state": infer_state(telemetry),
                 "representation_timestamp": data.get("timestamp", ""),
                 "representation_sequence": data.get("snapshot_sequence", ""),
+                **quality,
             })
     except (
         UnicodeDecodeError,

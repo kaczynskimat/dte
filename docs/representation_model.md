@@ -84,6 +84,15 @@ formula and one message per recorded sensor reading. State rules are tested at
 their thresholds. ML fidelity is measured on an unseen, chronologically later
 mission and compared with persistence baselines.
 
+At every replay tick, the bridge also verifies that all 22 periodic sensors
+belong to the current source timestamp and pass conservative physical-range
+checks. It exposes a `valid`, `warning` or `invalid` quality status plus explicit
+missing, stale and out-of-range flags. Route and stop are excluded from the
+staleness check because they are event-based. The end-to-end fidelity observer
+compares every completed Redis snapshot with its original CSV row and measures
+the field match rate and bridge latency. The reproducible procedure is described
+in `docs/fidelity_validation.md`.
+
 Operational drift can be monitored through rolling forecast MAE and the rate of
 anomaly flags. A sustained increase above validation levels indicates that the
 energy relationship has changed. The safe response is to retain the warning,
