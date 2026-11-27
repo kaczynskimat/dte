@@ -1,3 +1,3 @@
-from .inference import infer_state
+from .inference import infer_state, infer_transition
 
-__all__ = ["infer_state"]
+__all__ = ["infer_state", "infer_transition"]

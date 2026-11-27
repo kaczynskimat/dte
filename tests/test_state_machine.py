@@ -2,14 +2,14 @@ import json
 import unittest
 from pathlib import Path
 
-from src.state_machine import infer_state
+from src.state_machine import infer_state, infer_transition
 
 
 MOCK_STATE_PATH = Path(__file__).parents[1] / "data" / "mock_state.json"
 
 
-def state_parts(telemetry: dict) -> list[str]:
-    return infer_state(telemetry).split(" | ")
+def state_parts(telemetry: dict, previous_state: str | None = None) -> list[str]:
+    return infer_state(telemetry, previous_state).split(" | ")
 
 
 class InferStateTests(unittest.TestCase):
@@ -45,6 +45,43 @@ class InferStateTests(unittest.TestCase):
 
     def test_reverse_motion_is_supported(self) -> None:
         self.assertEqual(state_parts({"speed_kmh": -5})[1], "Reverse")
+
+    def test_retained_stop_name_does_not_keep_bus_at_stop(self) -> None:
+        parts = state_parts({
+            "speed_kmh": 20,
+            "doors_open": 0,
+            "itcs_stopName": "Zürich, Herdernstrasse",
+        })
+
+        self.assertEqual(parts[7], "BetweenStops")
+
+    def test_stop_state_lasts_until_bus_departs(self) -> None:
+        at_stop = infer_state({"speed_kmh": 0, "doors_open": 1})
+        doors_closed = state_parts(
+            {"speed_kmh": 0, "doors_open": 0},
+            previous_state=at_stop,
+        )
+        departed = state_parts(
+            {"speed_kmh": 10, "doors_open": 0},
+            previous_state=at_stop,
+        )
+
+        self.assertEqual(doors_closed[7], "AtStop")
+        self.assertEqual(departed[7], "BetweenStops")
+
+    def test_meaningful_transition_is_described(self) -> None:
+        previous = infer_state({"speed_kmh": 0, "doors_open": 1})
+        current = infer_state(
+            {"speed_kmh": 10, "doors_open": 0},
+            previous_state=previous,
+        )
+
+        self.assertEqual(
+            infer_transition(previous, current),
+            "Boarding/Stopped/AtStop -> Cruising/Forward/BetweenStops",
+        )
+        self.assertEqual(infer_transition(None, current), "Initialized")
+        self.assertEqual(infer_transition(current, current), "Unchanged")
 
     def test_raw_csv_and_mqtt_field_names_match(self) -> None:
         csv_state = infer_state({

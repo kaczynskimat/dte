@@ -45,24 +45,31 @@ class StateBridgeQualityTests(unittest.TestCase):
     def publish(self, suffix: str, payload: dict[str, object]) -> None:
         bridge.on_message(None, None, Message(f"ztbus/B208/{suffix}", payload))
 
-    def publish_snapshot(self, omitted: set[str] | None = None) -> None:
+    def publish_snapshot(
+        self,
+        omitted: set[str] | None = None,
+        overrides: dict[str, object] | None = None,
+        tick_time: int = 100,
+        sequence: int = 0,
+    ) -> None:
         omitted = omitted or set()
+        overrides = overrides or {}
         for field in PERIODIC_FIELDS:
             if field not in omitted:
                 self.publish(
                     f"sensors/{field}",
                     {
                         "timestamp": "2021-10-05 07:00:00",
-                        "time_unix": 100,
-                        field: valid_value(field),
+                        "time_unix": tick_time,
+                        field: overrides.get(field, valid_value(field)),
                     },
                 )
         self.publish(
             "replay/tick",
             {
                 "timestamp": "2021-10-05 07:00:00",
-                "time_unix": 100,
-                "snapshot_sequence": 0,
+                "time_unix": tick_time,
+                "snapshot_sequence": sequence,
             },
         )
 
@@ -73,6 +80,8 @@ class StateBridgeQualityTests(unittest.TestCase):
         self.assertEqual(state["quality_status"], "valid")
         self.assertEqual(json.loads(state["quality_flags"]), [])
         self.assertEqual(state["representation_sequence"], 0)
+        self.assertEqual(state["state_transition"], "Initialized")
+        self.assertEqual(state["state_changed"], 0)
 
     def test_tick_reports_a_sensor_missing_from_the_snapshot(self) -> None:
         self.publish_snapshot({"latitude"})
@@ -95,6 +104,21 @@ class StateBridgeQualityTests(unittest.TestCase):
             self.redis.hgetall("bus:B208:sensor:timestamps"),
             {},
         )
+
+    def test_bridge_records_departure_transition(self) -> None:
+        self.publish_snapshot(overrides={"doors_open": 1, "speed_kmh": 0})
+        self.publish_snapshot(
+            overrides={"doors_open": 0, "speed_kmh": 10},
+            tick_time=101,
+            sequence=1,
+        )
+
+        state = self.redis.hgetall("bus:B208:state")
+        self.assertEqual(
+            state["state_transition"],
+            "Boarding/Stopped/AtStop -> Cruising/Forward/BetweenStops",
+        )
+        self.assertEqual(state["state_changed"], 1)
 
 
 if __name__ == "__main__":
