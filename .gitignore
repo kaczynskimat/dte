@@ -4,4 +4,7 @@ data/B*.csv
 # Python bytecode generated while running the training and tests.
 __pycache__/
 *.py[cod]
+
+# Local / generated files
 .DS_Store
+.ipynb_checkpoints/

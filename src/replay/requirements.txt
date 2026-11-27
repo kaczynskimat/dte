@@ -1,2 +1,4 @@
 pandas==3.1.1
 paho-mqtt==2.1.0
+# Only needed when the dashboard controls the replay (--control-redis-host).
+redis==7.1.0

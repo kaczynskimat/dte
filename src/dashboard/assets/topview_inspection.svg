@@ -1,0 +1,114 @@
+<svg viewBox="0 0 1400 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vector top view of the articulated trolleybus showing wheels, axles, articulation joint, doors, roof equipment and trolley poles">
+  <defs>
+    <marker id="tv2-dim-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 1.5L10 5L0 8.5Z" fill="#788288"/>
+    </marker>
+  </defs>
+  <text x="140" y="54" class="inspection-view-label">TOP VIEW · FRONT →</text>
+
+  <!-- Body: rear section (trailer) and front section, nose to the right -->
+  <path class="inspection-outline inspection-target" data-inspection-target="record-time" d="M634 205H146Q120 205 120 231V389Q120 415 146 415H634Q638 415 638 411V209Q638 205 634 205ZM694 205H1252Q1286 205 1290 240Q1293 310 1290 380Q1286 415 1252 415H694Q690 415 690 411V209Q690 205 694 205Z"/>
+  <!-- Roof crown lines and windscreen edge -->
+  <path class="inspection-detail" d="M150 217H614Q626 217 626 229V391Q626 403 614 403H150Q132 403 132 385V235Q132 217 150 217Z"/>
+  <path class="inspection-detail" d="M714 217H1244Q1262 217 1265 236Q1268 310 1265 384Q1262 403 1244 403H714Q702 403 702 391V229Q702 217 714 217Z"/>
+  <path class="inspection-detail" d="M1272 226L1279 238M1274 382L1281 370"/>
+
+  <!-- Articulation: bellows and turntable -->
+  <rect class="inspection-target" data-inspection-targets="steering-angle vehicle-speed articulation-angle" x="643" y="211" width="42" height="198" rx="3" fill="#fff" stroke="#465158" stroke-width="1.6"/>
+  <path class="inspection-detail" d="M650 211V229M657 211V229M664 211V229M671 211V229M678 211V229M650 391V409M657 391V409M664 391V409M671 391V409M678 391V409"/>
+  <path class="inspection-detail inspection-target" data-inspection-targets="steering-angle vehicle-speed articulation-angle" d="M330 259V361M760 259V361M1118 245V375M645 310A19 19 0 1 0 683 310A19 19 0 1 0 645 310" stroke-dasharray="14 5 2 5"/>
+
+  <!-- Roof equipment -->
+  <g fill="#fff" stroke="#465158" stroke-width="1.6">
+    <rect x="188" y="288" width="44" height="44" rx="4"/>
+    <rect x="368" y="256" width="72" height="108" rx="6"/>
+    <rect x="812" y="268" width="50" height="84" rx="5"/>
+    <rect x="880" y="250" width="105" height="120" rx="5"/>
+    <rect x="1035" y="252" width="65" height="116" rx="6"/>
+  </g>
+  <g class="inspection-detail">
+    <rect x="195" y="295" width="30" height="30" rx="2"/>
+    <circle cx="404" cy="284" r="17"/>
+    <circle cx="404" cy="336" r="17"/>
+    <path d="M915 250V370M950 250V370M890 262H905M890 270H905M890 278H905M890 342H905M890 350H905M890 358H905"/>
+    <circle cx="1067.5" cy="282" r="18"/>
+    <circle cx="1067.5" cy="338" r="18"/>
+  </g>
+
+  <!-- Driver cab, front left -->
+  <g class="inspection-detail">
+    <path d="M1166 222V300Q1166 306 1172 306H1238"/>
+    <path d="M1180 240h24q16 0 16 17t-16 17h-24Z"/>
+    <path d="M1187 243V271"/>
+    <rect x="1231" y="241" width="8" height="32" rx="4"/>
+  </g>
+
+  <!-- Rectangular side mirrors -->
+  <path class="inspection-strong-detail" d="M1248 205L1264 189M1248 415L1264 431"/>
+  <rect x="1261" y="157" width="10" height="33" rx="3" fill="#fff" stroke="#465158" stroke-width="1.6"/>
+  <rect x="1261" y="430" width="10" height="33" rx="3" fill="#fff" stroke="#465158" stroke-width="1.6"/>
+
+  <!-- Three axles: twin tyres on rear and driven middle axle, single tyres on steered front axle -->
+  <g fill="#fff" stroke="#30383c" stroke-width="2.2">
+    <rect class="inspection-target" data-inspection-target="wheel-rear-left" x="298" y="195" width="64" height="22" rx="6"/>
+    <rect class="inspection-target" data-inspection-target="wheel-rear-left" x="298" y="221" width="64" height="22" rx="6"/>
+    <rect class="inspection-target" data-inspection-target="wheel-rear-right" x="298" y="377" width="64" height="22" rx="6"/>
+    <rect class="inspection-target" data-inspection-target="wheel-rear-right" x="298" y="403" width="64" height="22" rx="6"/>
+    <rect class="inspection-target" data-inspection-target="wheel-middle-left" x="728" y="195" width="64" height="22" rx="6"/>
+    <rect class="inspection-target" data-inspection-target="wheel-middle-left" x="728" y="221" width="64" height="22" rx="6"/>
+    <rect class="inspection-target" data-inspection-target="wheel-middle-right" x="728" y="377" width="64" height="22" rx="6"/>
+    <rect class="inspection-target" data-inspection-target="wheel-middle-right" x="728" y="403" width="64" height="22" rx="6"/>
+    <rect class="inspection-target" data-inspection-target="wheel-front-left" x="1086" y="195" width="64" height="34" rx="9"/>
+    <rect class="inspection-target" data-inspection-target="wheel-front-right" x="1086" y="391" width="64" height="34" rx="9"/>
+  </g>
+
+  <!-- Brake discs inboard of each wheel -->
+  <g fill="#fff" stroke="#465158" stroke-width="1.3">
+    <rect class="inspection-target" data-inspection-targets="brake-pressure brake-line-pressure holding-brake parking-brake traction-force" x="316" y="247" width="28" height="8" rx="2"/>
+    <rect class="inspection-target" data-inspection-targets="brake-pressure brake-line-pressure holding-brake parking-brake traction-force" x="316" y="365" width="28" height="8" rx="2"/>
+    <rect class="inspection-target" data-inspection-targets="brake-pressure brake-line-pressure holding-brake parking-brake traction-force" x="746" y="247" width="28" height="8" rx="2"/>
+    <rect class="inspection-target" data-inspection-targets="brake-pressure brake-line-pressure holding-brake parking-brake traction-force" x="746" y="365" width="28" height="8" rx="2"/>
+    <rect class="inspection-target" data-inspection-targets="brake-pressure brake-line-pressure holding-brake parking-brake traction-force" x="1104" y="233" width="28" height="8" rx="2"/>
+    <rect class="inspection-target" data-inspection-targets="brake-pressure brake-line-pressure holding-brake parking-brake traction-force" x="1104" y="379" width="28" height="8" rx="2"/>
+  </g>
+
+  <!-- Four double doors on the passenger side -->
+  <g fill="#fff" stroke="#465158" stroke-width="1.6">
+    <rect class="inspection-target" data-inspection-targets="door-status passengers route stop" x="158" y="411" width="80" height="11" rx="2"/>
+    <rect class="inspection-target" data-inspection-targets="door-status passengers route stop" x="540" y="411" width="80" height="11" rx="2"/>
+    <rect class="inspection-target" data-inspection-targets="door-status passengers route stop" x="900" y="411" width="80" height="11" rx="2"/>
+    <rect class="inspection-target" data-inspection-targets="door-status passengers route stop" x="1166" y="411" width="74" height="11" rx="2"/>
+  </g>
+  <path class="inspection-detail" d="M198 411V422M580 411V422M940 411V422M1203 411V422"/>
+
+  <!-- Trolley poles: base on the front section, running back over the joint -->
+  <g fill="#fff" stroke="#465158" stroke-width="1.5">
+    <rect class="inspection-target" data-inspection-target="grid-connection" x="474" y="288.5" width="368" height="5" rx="2.5"/>
+    <rect class="inspection-target" data-inspection-target="grid-connection" x="474" y="326.5" width="368" height="5" rx="2.5"/>
+    <rect class="inspection-target" data-inspection-target="grid-connection" x="465" y="279" width="10" height="24" rx="2"/>
+    <rect class="inspection-target" data-inspection-target="grid-connection" x="465" y="317" width="10" height="24" rx="2"/>
+    <circle cx="840" cy="291" r="7"/>
+    <circle cx="840" cy="329" r="7"/>
+  </g>
+
+  <!-- GNSS antenna -->
+  <rect class="inspection-target" data-inspection-targets="gnss-altitude latitude longitude heading ambient-temperature grid-connection" x="999" y="299" width="22" height="22" rx="11" fill="#fff" stroke="#465158" stroke-width="1.6"/>
+  <circle class="inspection-detail" cx="1010" cy="310" r="4"/>
+
+  <!-- Overall length -->
+  <path class="inspection-detail" d="M120 432V556M1291 432V556"/>
+  <path class="inspection-detail" d="M121 545H1290" marker-start="url(#tv2-dim-arrow)" marker-end="url(#tv2-dim-arrow)"/>
+  <text x="705.5" y="535" class="inspection-view-label" text-anchor="middle">≈ 18.7 m</text>
+
+  <!-- Numbered leaders match the inspection fields at right -->
+  <g class="inspection-target" data-inspection-target="wheel-rear-left"><path class="inspection-leader" d="M330 195V163"/><circle class="inspection-marker" cx="330" cy="150" r="13"/><text class="inspection-marker-text" x="330" y="150">1</text></g>
+  <g class="inspection-target" data-inspection-target="wheel-rear-right"><path class="inspection-leader" d="M330 425V457"/><circle class="inspection-marker" cx="330" cy="470" r="13"/><text class="inspection-marker-text" x="330" y="470">2</text></g>
+  <g class="inspection-target" data-inspection-target="wheel-middle-left"><path class="inspection-leader" d="M760 195V163"/><circle class="inspection-marker" cx="760" cy="150" r="13"/><text class="inspection-marker-text" x="760" y="150">3</text></g>
+  <g class="inspection-target" data-inspection-target="wheel-middle-right"><path class="inspection-leader" d="M760 425V457"/><circle class="inspection-marker" cx="760" cy="470" r="13"/><text class="inspection-marker-text" x="760" y="470">4</text></g>
+  <g class="inspection-target" data-inspection-target="wheel-front-left"><path class="inspection-leader" d="M1118 195V163"/><circle class="inspection-marker" cx="1118" cy="150" r="13"/><text class="inspection-marker-text" x="1118" y="150">5</text></g>
+  <g class="inspection-target" data-inspection-target="wheel-front-right"><path class="inspection-leader" d="M1118 425V457"/><circle class="inspection-marker" cx="1118" cy="470" r="13"/><text class="inspection-marker-text" x="1118" y="470">6</text></g>
+  <g class="inspection-target" data-inspection-targets="steering-angle vehicle-speed articulation-angle"><path class="inspection-leader" d="M664 211V163"/><circle class="inspection-marker" cx="664" cy="150" r="13"/><text class="inspection-marker-text" x="664" y="150">7</text></g>
+  <g class="inspection-target" data-inspection-targets="brake-pressure brake-line-pressure holding-brake parking-brake traction-force"><path class="inspection-leader" d="M316 251H200V163"/><circle class="inspection-marker" cx="200" cy="150" r="13"/><text class="inspection-marker-text" x="200" y="150">8</text></g>
+  <g class="inspection-target" data-inspection-targets="door-status passengers route stop"><path class="inspection-leader" d="M940 422V457"/><circle class="inspection-marker" cx="940" cy="470" r="13"/><text class="inspection-marker-text" x="940" y="470">9</text></g>
+  <g class="inspection-target" data-inspection-targets="gnss-altitude latitude longitude heading ambient-temperature grid-connection"><path class="inspection-leader" d="M1010 299V163"/><circle class="inspection-marker" cx="1010" cy="150" r="13"/><text class="inspection-marker-text" x="1010" y="150">10</text></g>
+</svg>

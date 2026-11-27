@@ -1,4 +1,9 @@
-"""Replay a cleaned ZTBus mission over MQTT as simulated live telemetry."""
+"""Replay a cleaned ZTBus mission over MQTT as simulated live telemetry.
+
+Optionally (``--control-redis-host``) the replay is also driven through the Redis hash
+``ztbus:replay:control``, which is how the dashboard's Replay page pauses, resumes, stops and changes
+the speed of a running replay. Without it the producer only needs the MQTT broker.
+"""
 
 import argparse
 import json
@@ -15,6 +20,9 @@ PROJECT_ROOT = Path(__file__).parents[2]
 DEFAULT_MISSION = PROJECT_ROOT / "data" / "test_mission_2021-10-05.csv"
 DEFAULT_BUS_ID = "B208"
 DEFAULT_ROUTE = "83"
+CONTROL_KEY = "ztbus:replay:control"
+MIN_SPEED, MAX_SPEED = 0.25, 10.0
+CONTROL_POLL_SECONDS = 0.2
 
 REQUIRED_COLUMNS = {
     "timestamp",
@@ -87,6 +95,31 @@ def _new_client() -> mqtt.Client:
         return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     except AttributeError:
         return mqtt.Client()
+
+
+class ReplayControl:
+    """Dashboard control of a running replay through the Redis hash ``ztbus:replay:control``.
+
+    The dashboard writes ``status`` (running / paused / stopped) and ``speed``; the producer writes
+    its progress (``index`` / ``total``) and how the replay ended.
+    """
+
+    def __init__(self, host: str, port: int) -> None:
+        import redis  # only needed for a dashboard-controlled replay
+
+        self.client = redis.Redis(host=host, port=port, decode_responses=True, socket_connect_timeout=5)
+        self.client.ping()
+
+    def read(self) -> tuple[str, float | None]:
+        control = self.client.hgetall(CONTROL_KEY)
+        try:
+            speed = min(MAX_SPEED, max(MIN_SPEED, float(control["speed"])))
+        except (KeyError, TypeError, ValueError):
+            speed = None
+        return control.get("status", "running"), speed
+
+    def update(self, **fields: Any) -> None:
+        self.client.hset(CONTROL_KEY, mapping=fields)
 
 
 def validate_mission(data: pd.DataFrame, expected_route: str) -> None:
@@ -193,6 +226,7 @@ def replay(
     start_row: int,
     max_rows: int | None,
     qos: int,
+    control: ReplayControl | None = None,
 ) -> None:
     if speed <= 0 or not math.isfinite(speed):
         raise ValueError("speed must be a finite number greater than zero")
@@ -209,6 +243,9 @@ def replay(
         max_rows=max_rows,
     )
 
+    if control:
+        control.update(status="running", speed=speed, index=0, total=len(selected))
+
     client = _new_client()
     client.connect(broker_host, broker_port, 60)
     client.loop_start()
@@ -224,20 +261,47 @@ def replay(
         "replay_end": str(selected["timestamp"].iloc[-1]),
     }, qos)
 
-    dataset_start = float(selected["time_unix"].iloc[0])
-    real_start = time.monotonic()
+    # Replay clock: dataset time advances by (real time elapsed) x speed. With a constant speed this
+    # is exactly t0 + (T - T0) / speed; pauses freeze it and speed changes apply from that moment on.
+    replay_time = float(selected["time_unix"].iloc[0])
+    last_tick = time.monotonic()
+    last_poll = float("-inf")
+    paused = False
+    last_sequence = start_row - 1
+    completed = False
+    stopped = False
     try:
-        last_sequence = start_row - 1
-        completed = False
-        for sequence, (_, row) in enumerate(selected.iterrows(), start=start_row):
-            target = real_start + (float(row["time_unix"]) - dataset_start) / speed
-            delay = target - time.monotonic()
-            if delay > 0:
-                time.sleep(delay)
+        for position, (sequence, (_, row)) in enumerate(
+            enumerate(selected.iterrows(), start=start_row), start=1
+        ):
+            row_time = float(row["time_unix"])
+            while True:
+                now = time.monotonic()
+                if control and now - last_poll >= CONTROL_POLL_SECONDS:
+                    last_poll = now
+                    requested, requested_speed = control.read()
+                    if requested not in {"running", "paused"}:
+                        stopped = True
+                        break
+                    paused = requested == "paused"
+                    if requested_speed is not None:
+                        speed = requested_speed
+                if not paused:
+                    replay_time += (now - last_tick) * speed
+                last_tick = now
+                remaining = (row_time - replay_time) / speed
+                if not paused and remaining <= 0:
+                    break
+                wait = CONTROL_POLL_SECONDS / 2 if paused else remaining
+                time.sleep(min(wait, CONTROL_POLL_SECONDS / 2) if control else wait)
+            if stopped:
+                break
 
             for suffix, payload in build_payloads(row, sequence).items():
                 publish_json(client, f"{prefix}/{suffix}", payload, qos)
             last_sequence = sequence
+            if control:
+                control.update(index=position)
 
             if (sequence - start_row) % 50 == 0:
                 print(
@@ -245,9 +309,15 @@ def replay(
                     f"sample {sequence - start_row + 1}/{len(selected)} | "
                     f"{row['speed_kmh']:.1f} km/h"
                 )
-        completed = True
+        completed = not stopped
+    except Exception as error:
+        if control:
+            control.update(status="error", error=str(error)[:500])
+        raise
     finally:
-        status = "completed" if completed else "interrupted"
+        status = "completed" if completed else ("stopped" if stopped else "interrupted")
+        if control and status != "interrupted":
+            control.update(status=status)
         publish_json(client, f"{prefix}/replay", {
             "replay_status": status,
             "source_file": mission_path.name,
@@ -272,11 +342,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-row", type=int, default=0)
     parser.add_argument("--max-rows", type=int)
     parser.add_argument("--qos", type=int, choices=(0, 1), default=0)
+    parser.add_argument(
+        "--control-redis-host",
+        help="Follow pause/resume/stop and speed changes from the Redis hash "
+        f"{CONTROL_KEY} (used by the dashboard)",
+    )
+    parser.add_argument("--control-redis-port", type=int, default=6379)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    control = (
+        ReplayControl(args.control_redis_host, args.control_redis_port)
+        if args.control_redis_host
+        else None
+    )
     replay(
         mission_path=args.file.resolve(),
         broker_host=args.broker_host,
@@ -290,6 +371,7 @@ def main() -> None:
         start_row=args.start_row,
         max_rows=args.max_rows,
         qos=args.qos,
+        control=control,
     )
 
 
