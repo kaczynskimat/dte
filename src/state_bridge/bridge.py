@@ -8,9 +8,12 @@ Every message on ``ztbus/<bus>/...`` (one topic per sensor, see docs/sensor_stre
 
 ``ztbus/<bus>/replay/tick`` closes that situation: its readings, the tick itself and the
 ``operational_state`` derived by the rule-based state machine (``src.state_machine.infer_state``)
-replace the old values of ``bus:<bus>:state`` in one transaction. Readers of the hash (the ML worker,
-the dashboard) therefore never see a mix of two seconds, however fast the replay runs. When the
-operational state changes it is also appended to the stream as a ``ztbus/<bus>/state`` message.
+replace the old values of ``bus:<bus>:state`` in one transaction, together with the data-quality
+result of that second (``quality_*`` fields, see docs/fidelity_validation.md). Readers of the hash
+(the ML worker, the dashboard) therefore never see a mix of two seconds, however fast the replay runs.
+When the operational state changes it is also appended to the stream as a ``ztbus/<bus>/state``
+message. A ``replay_status: running`` message on ``ztbus/<bus>/replay`` clears the state of the
+previous run first.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 if str(PROJECT_DIR) not in sys.path:  # also runnable as `python src/state_bridge/bridge.py`
     sys.path.insert(0, str(PROJECT_DIR))
 
+from src.state_bridge.quality import evaluate_quality  # noqa: E402
 from src.state_machine import infer_state  # noqa: E402
 
 
@@ -40,10 +44,18 @@ TOPIC_LATEST_PREFIX = "ztbus:replay:topic_latest:"
 TOPIC_COUNTS_KEY = "ztbus:replay:topic_counts"
 BRIDGE_STATUS_KEY = "ztbus:replay:bridge_status"
 TICK_SUFFIX = "/replay/tick"
+REPLAY_SUFFIX = "/replay"
+# Reserved entry of a bus's pending readings: the source time of each sensor received this second.
+SENSOR_TIMES_FIELD = "__sensor_times__"
 
 
 def state_key(bus_id: str) -> str:
     return f"bus:{bus_id}:state"
+
+
+def sensor_times_key(bus_id: str) -> str:
+    """Source time of the latest reading of each sensor (docs/fidelity_validation.md)."""
+    return f"bus:{bus_id}:sensor:timestamps"
 
 
 def _flatten(data: dict[str, Any]) -> dict[str, Any]:
@@ -84,18 +96,34 @@ def apply_tick(
     tick: dict[str, Any],
     readings: dict[str, Any],
 ) -> str | None:
-    """Apply one complete situation atomically; returns the operational state only when it changed."""
+    """Apply one complete situation atomically; returns the operational state only when it changed.
+
+    The data-quality result (``src.state_bridge.quality``) is computed on the same situation and
+    written in the same transaction, so it always describes the second the hash shows.
+    """
     key = state_key(bus_id)
+    times_key = sensor_times_key(bus_id)
+    readings = dict(readings)
+    new_sensor_times = readings.pop(SENSOR_TIMES_FIELD, {})
     previous_state = r.hgetall(key)
     situation = {**readings, **_flatten(tick)}
-    operational_state = infer_state({**previous_state, **situation})
+    telemetry = {**previous_state, **situation}
+    operational_state = infer_state(telemetry)
+    quality = evaluate_quality(
+        telemetry,
+        {**r.hgetall(times_key), **new_sensor_times},
+        tick.get("time_unix", tick.get("timestamp")),
+    )
     situation.update({
         "operational_state": operational_state,
         "representation_timestamp": tick.get("timestamp", ""),
         "representation_sequence": tick.get("snapshot_sequence", ""),
+        **quality,
     })
     with r.pipeline(transaction=True) as pipeline:
         pipeline.hset(key, mapping=situation)
+        if new_sensor_times:
+            pipeline.hset(times_key, mapping=new_sensor_times)
         pipeline.execute()
     if operational_state == previous_state.get("operational_state"):
         return None
@@ -141,8 +169,16 @@ def handle_message(
         return apply_tick(r, bus_id, data, pending.pop(bus_id, {}))
     if "/sensors/" in topic:
         # Held until the tick closes this second (see the module docstring).
-        pending.setdefault(bus_id, {}).update(_flatten(data))
+        bus_pending = pending.setdefault(bus_id, {})
+        bus_pending.update(_flatten(data))
+        sensor_time = data.get("time_unix", data.get("timestamp"))
+        if sensor_time is not None:
+            bus_pending.setdefault(SENSOR_TIMES_FIELD, {})[parts[-1]] = sensor_time
         return None
+    if topic.endswith(REPLAY_SUFFIX) and data.get("replay_status") == "running":
+        # A new replay must not inherit sensor readings or quality results from the previous run.
+        pending.pop(bus_id, None)
+        r.delete(state_key(bus_id), sensor_times_key(bus_id))
     # Replay status and other bus-level messages are not part of a timed situation.
     r.hset(state_key(bus_id), mapping=_flatten(data))
     return None

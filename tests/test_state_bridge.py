@@ -32,6 +32,12 @@ class FakeRedis:
     def xadd(self, key, fields, maxlen=None, approximate=True):
         self.streams.setdefault(key, []).append(dict(fields))
 
+    def delete(self, *keys):
+        for key in keys:
+            self.strings.pop(key, None)
+            self.hashes.pop(key, None)
+            self.streams.pop(key, None)
+
 
 class FakePipeline:
     """Queues commands and runs them on execute(), like redis-py's pipeline."""
