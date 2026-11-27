@@ -9,7 +9,8 @@ Every message on ``ztbus/<bus>/...`` (one topic per sensor, see docs/sensor_stre
 ``ztbus/<bus>/replay/tick`` closes that situation: its readings, the tick itself and the
 ``operational_state`` derived by the rule-based state machine (``src.state_machine.infer_state``)
 replace the old values of ``bus:<bus>:state`` in one transaction, together with the data-quality
-result of that second (``quality_*`` fields, see docs/fidelity_validation.md). Readers of the hash
+result of that second (``quality_*`` fields, see docs/fidelity_validation.md) and the transition
+from the previous state (``state_transition``, see docs/representation_model.md). Readers of the hash
 (the ML worker, the dashboard) therefore never see a mix of two seconds, however fast the replay runs.
 When the operational state changes it is also appended to the stream as a ``ztbus/<bus>/state``
 message. A ``replay_status: running`` message on ``ztbus/<bus>/replay`` clears the state of the
@@ -33,7 +34,7 @@ if str(PROJECT_DIR) not in sys.path:  # also runnable as `python src/state_bridg
     sys.path.insert(0, str(PROJECT_DIR))
 
 from src.state_bridge.quality import evaluate_quality  # noqa: E402
-from src.state_machine import infer_state  # noqa: E402
+from src.state_machine import infer_state, infer_transition  # noqa: E402
 
 
 SUBSCRIPTION = "ztbus/#"
@@ -108,7 +109,9 @@ def apply_tick(
     previous_state = r.hgetall(key)
     situation = {**readings, **_flatten(tick)}
     telemetry = {**previous_state, **situation}
-    operational_state = infer_state(telemetry)
+    previous_operational_state = previous_state.get("operational_state")
+    operational_state = infer_state(telemetry, previous_operational_state)
+    transition = infer_transition(previous_operational_state, operational_state)
     quality = evaluate_quality(
         telemetry,
         {**r.hgetall(times_key), **new_sensor_times},
@@ -116,6 +119,10 @@ def apply_tick(
     )
     situation.update({
         "operational_state": operational_state,
+        "previous_operational_state": previous_operational_state or "",
+        "state_transition": transition,
+        "state_changed": int(transition not in {"Initialized", "Unchanged"}),
+        "state_transition_timestamp": tick.get("timestamp", ""),
         "representation_timestamp": tick.get("timestamp", ""),
         "representation_sequence": tick.get("snapshot_sequence", ""),
         **quality,
@@ -125,7 +132,7 @@ def apply_tick(
         if new_sensor_times:
             pipeline.hset(times_key, mapping=new_sensor_times)
         pipeline.execute()
-    if operational_state == previous_state.get("operational_state"):
+    if operational_state == previous_operational_state:
         return None
     _append_to_stream(r, f"ztbus/{bus_id}/state", {
         "timestamp": tick.get("timestamp"),

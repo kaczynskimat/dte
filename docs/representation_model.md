@@ -43,6 +43,15 @@ sensor state, applies the rules and replaces the derived operational state. A
 missing or discontinuous replay sequence resets the ML history so that a
 forecast is never constructed across a gap.
 
+`AtStop` is entered when the doors open, remains active after they close while
+the bus is still stationary, and changes to `BetweenStops` when the bus moves.
+The retained stop name is descriptive context rather than proof that the bus is
+currently stopped: in the source data a stop event can be emitted after the bus
+has departed. Redis exposes each meaningful operation/motion/stop change in
+`state_transition`, for example
+`Boarding/Stopped/AtStop -> Cruising/Forward/BetweenStops`, together with
+`state_changed`, `previous_operational_state` and the transition timestamp.
+
 ## Initial situation and replay interval
 
 The user selects a timestamp interval and replay speed. The first selected

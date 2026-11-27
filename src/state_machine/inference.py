@@ -107,12 +107,52 @@ def _heading(telemetry: dict) -> str:
     return directions[int((heading_deg + 22.5) // 45) % 8]
 
 
-def infer_state(telemetry: dict) -> str:
+def _was_at_stop(previous_state: str | None) -> bool:
+    if not previous_state:
+        return False
+    parts = [part.strip() for part in previous_state.split("|")]
+    return len(parts) > 7 and parts[7] == "AtStop"
+
+
+def _stop_status(
+    doors_open: bool,
+    motion: str,
+    previous_state: str | None,
+) -> str:
+    # Stop names are event-based and can be emitted after the bus has already
+    # departed. Door activity is the reliable evidence that a stop is active.
+    if doors_open:
+        return "AtStop"
+    if motion != "Stopped":
+        return "BetweenStops"
+    if _was_at_stop(previous_state):
+        return "AtStop"
+    return "BetweenStops"
+
+
+def _transition_dimensions(state: str) -> str:
+    parts = [part.strip() for part in state.split("|")]
+    if len(parts) <= 7:
+        return state.strip()
+    return f"{parts[0]}/{parts[1]}/{parts[7]}"
+
+
+def infer_transition(previous_state: str | None, current_state: str) -> str:
+    """Describe a meaningful operation/motion/stop transition."""
+    if not previous_state:
+        return "Initialized"
+    previous = _transition_dimensions(previous_state)
+    current = _transition_dimensions(current_state)
+    if previous == current:
+        return "Unchanged"
+    return f"{previous} -> {current}"
+
+
+def infer_state(telemetry: dict, previous_state: str | None = None) -> str:
     speed_kmh = _speed_kmh(telemetry)
     power_kw = _power_kw(telemetry)
     motion = _motion(speed_kmh)
     doors_open = _flag(telemetry, "doors_open", "status_doorIsOpen")
-    stop_name = str(_value(telemetry, "itcs_stopName", default="-")).strip()
     route = str(_value(telemetry, "itcs_busRoute", default="-")).strip()
 
     if doors_open:
@@ -136,7 +176,7 @@ def infer_state(telemetry: dict) -> str:
             "grid_available",
             "status_gridIsAvailable",
         ) else "Unavailable",
-        "AtStop" if stop_name not in {"", "-"} else "BetweenStops",
+        _stop_status(doors_open, motion, previous_state),
         "InService" if route not in {"", "-"} else "Unknown",
         _occupancy(telemetry),
         _heading(telemetry),

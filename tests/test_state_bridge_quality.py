@@ -20,13 +20,21 @@ class StateBridgeQualityTests(unittest.TestCase):
     def publish(self, suffix: str, payload: dict[str, object]) -> None:
         publish(self.redis, f"ztbus/B208/{suffix}", payload)
 
-    def publish_snapshot(self, omitted: set[str] | None = None, time_unix: int = 100) -> None:
+    def publish_snapshot(
+        self,
+        omitted: set[str] | None = None,
+        overrides: dict[str, object] | None = None,
+        time_unix: int = 100,
+        sequence: int = 0,
+    ) -> None:
         omitted = omitted or set()
+        overrides = overrides or {}
         meta = {"timestamp": "2021-10-05 07:00:00", "time_unix": time_unix}
         for field in PERIODIC_FIELDS:
             if field not in omitted:
-                self.publish(f"sensors/{field}", {**meta, field: valid_value(field)})
-        self.publish("replay/tick", {**meta, "snapshot_sequence": 0})
+                value = overrides.get(field, valid_value(field))
+                self.publish(f"sensors/{field}", {**meta, field: value})
+        self.publish("replay/tick", {**meta, "snapshot_sequence": sequence})
 
     def state(self) -> dict[str, str]:
         return self.redis.hgetall(state_key("B208"))
@@ -38,6 +46,8 @@ class StateBridgeQualityTests(unittest.TestCase):
         self.assertEqual(state["quality_status"], "valid")
         self.assertEqual(json.loads(state["quality_flags"]), [])
         self.assertEqual(state["representation_sequence"], "0")
+        self.assertEqual(state["state_transition"], "Initialized")
+        self.assertEqual(state["state_changed"], "0")
 
     def test_tick_reports_a_sensor_missing_from_the_snapshot(self) -> None:
         self.publish_snapshot({"latitude"})
@@ -48,7 +58,7 @@ class StateBridgeQualityTests(unittest.TestCase):
 
     def test_reading_kept_from_an_earlier_second_is_stale(self) -> None:
         self.publish_snapshot(time_unix=100)
-        self.publish_snapshot({"speed_kmh"}, time_unix=101)
+        self.publish_snapshot({"speed_kmh"}, time_unix=101, sequence=1)
 
         state = self.state()
         self.assertEqual(state["quality_status"], "warning")
@@ -63,6 +73,21 @@ class StateBridgeQualityTests(unittest.TestCase):
         self.assertNotIn("speed_kmh", self.state())
         self.assertEqual(self.state()["replay_status"], "running")
         self.assertEqual(self.redis.hgetall(sensor_times_key("B208")), {})
+
+    def test_bridge_records_departure_transition(self) -> None:
+        self.publish_snapshot(overrides={"doors_open": 1, "speed_kmh": 0})
+        self.publish_snapshot(
+            overrides={"doors_open": 0, "speed_kmh": 10},
+            time_unix=101,
+            sequence=1,
+        )
+
+        state = self.state()
+        self.assertEqual(
+            state["state_transition"],
+            "Boarding/Stopped/AtStop -> Cruising/Forward/BetweenStops",
+        )
+        self.assertEqual(state["state_changed"], "1")
 
 
 if __name__ == "__main__":
